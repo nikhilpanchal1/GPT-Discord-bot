@@ -1,3 +1,8 @@
+# GPT Discord Bot
+
+A Discord bot that integrates with OpenAI's GPT models to provide AI-powered responses in Discord channels.
+
+## Installation
 install requirements by running `pip install -r requirements.txt` in the root directory of the project.
 
 ## Usage
