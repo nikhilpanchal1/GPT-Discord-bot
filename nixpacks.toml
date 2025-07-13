@@ -1,7 +1,0 @@
-# Nixpacks build configuration.
-# Docs: https://nixpacks.com/docs/configuration/file
-
-[phases.setup]
-# Add `libmagic` system dependency for the `python-magic` package.
-# "..." preserves the default Nixpacks packages for Python.
-nixPkgs = ["...", "pkgs.file"] 

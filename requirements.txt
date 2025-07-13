@@ -5,6 +5,5 @@ python-dotenv == 1.0.0
 google-generativeai
 PyPDF2
 Pillow
-python-magic
 aiofiles
 aiohttp

@@ -2,13 +2,12 @@
 # Docs: https://docs.railway.app/guides/config-as-code
 
 [build]
-# Use custom Nixpacks configuration for system dependencies.
-nixpacksConfigPath = "nixpacks.toml"
+# Use auto-detected Python configuration from UI.
 
 [deploy]
 # Set the start command for the application.
 startCommand = "python run.py"
 
 # Restart the service on failure.
-restartPolicyType = "on-failure"
+restartPolicyType = "never"
 restartPolicyMaxRetries = 10 
