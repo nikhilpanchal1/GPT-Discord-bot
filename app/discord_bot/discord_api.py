@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 import os
 import discord
 import aiohttp
+import asyncio
+import functools
 from app.ai_model.openai import get_ai_response
 from app.ai_model.gemini import get_gemini_response
 from app.storage.conversation_storage import conversation_storage
@@ -46,7 +48,7 @@ class MyClient(discord.Client):
 • `/gemini <message>` - Chat with Gemini Flash
 
 **File Analysis:**
-• Upload images, PDFs, or text files with your message
+• Upload images, PDFs, or text files with `/gpt` or `/gemini` commands
 • Supports: JPG, PNG, GIF, PDF, TXT files (max 50MB)
 
 **Conversation:**
@@ -56,10 +58,10 @@ class MyClient(discord.Client):
 **Features:**
 ✅ Maintains conversation context per user/channel
 ✅ Multimodal analysis (images, documents)
-✅ Automatic file processing
+✅ File processing with explicit commands
 ✅ Smart content extraction
 
-Just upload a file and ask a question to analyze it!
+Use `/gpt` or `/gemini` with your file uploads for analysis!
             """
             await message.channel.send(help_text)
             return
@@ -83,13 +85,6 @@ Just upload a file and ask a question to analyze it!
                 model_name = name
                 model_function = func
                 break
-
-        # If no command but there are attachments, default to GPT
-        if not command and message.attachments:
-            command = '/gpt'
-            user_input = content if content else "Please analyze this file."
-            model_name = 'gpt'
-            model_function = get_ai_response
 
         if not command:
             return
@@ -144,12 +139,20 @@ Just upload a file and ask a question to analyze it!
                 # Store user message
                 conversation_storage.add_message(user_id, channel_id, 'user', user_input, model_name)
                 
-                # Get AI response
-                bot_response = model_function(
-                    prompt=user_input,
-                    conversation_history=conversation_history,
-                    file_info=file_info
-                )
+                # Show typing indicator while processing
+                async with message.channel.typing():
+                    # Get AI response (run in thread pool to avoid blocking Discord's event loop)
+                    loop = asyncio.get_event_loop()
+                    
+                    # Create partial function with keyword arguments
+                    ai_call = functools.partial(
+                        model_function,
+                        prompt=user_input,
+                        conversation_history=conversation_history,
+                        file_info=file_info
+                    )
+                    
+                    bot_response = await loop.run_in_executor(None, ai_call)
                 
                 # Store assistant response
                 conversation_storage.add_message(user_id, channel_id, 'assistant', bot_response, model_name)

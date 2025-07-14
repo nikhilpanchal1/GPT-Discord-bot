@@ -29,9 +29,9 @@ def get_gemini_response(prompt: str, conversation_history: Optional[List[Dict]] 
     try:
         # Choose appropriate model based on content
         if file_info and file_info.get('success') and file_info.get('type') == 'image':
-            model = GenerativeModel('gemini-1.5-flash-latest')
+            model = GenerativeModel('gemini-2.5-pro')
         else:
-            model = GenerativeModel('gemini-1.5-flash-latest')
+            model = GenerativeModel('gemini-2.5-pro')
         
         # Build conversation history for context
         full_prompt = ""
