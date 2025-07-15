@@ -6,11 +6,15 @@ A sophisticated Discord bot engineered with persistent conversation memory and a
 • **Persistent Conversations**: Built per-user/channel memory with automatic context injection
 • **Multimodal Analysis**: Integrated GPT-4V + Gemini Vision for images, PDF extraction for documents  
 • **Smart File Processing**: Developed drag-and-drop analysis with automatic type detection (50MB limit)
+• **Sarcasm Mode**: AI-powered sarcastic responses with intelligent conversation context analysis
+• **Language Detection**: Automatic detection of English, Hinglish, and Romanized Hindi conversation patterns
 • **Enhanced UX**: Implemented /clear, /help commands with typing indicators and emoji feedback
 
 ## Technical Highlights
 • Engineered async file download/processing pipeline with aiohttp + Pillow + PyPDF2
-• Designed thread-safe JSON conversation storage with configurable cleanup (7-day default)
+• Implemented AI-powered sarcasm mode with intelligent conversation context analysis
+• Designed intelligent language detection system for English, Hinglish, and Romanized Hindi
+• Built dynamic response generation with multiple personality modes and styles
 • Architected type-safe codebase with comprehensive error handling and message splitting
 • Built modular architecture: separate storage, utils, and AI model layers
 
@@ -63,6 +67,7 @@ python run.py
 |---------|-------------|
 | `/gpt <message>` | Chat with GPT-4o |
 | `/gemini <message>` | Chat with Gemini Flash |
+| `/gemini S [message]` | Sarcastic mode - Jump into conversation with witty, sarcastic responses |
 | `/clear` or `/reset` | Clear conversation history |
 | `/help` | Show available commands |
 
@@ -83,6 +88,30 @@ Upload a text file + "/gemini What are the key points?"
 **File-only Analysis:**
 ```
 Simply upload any supported file without a command - defaults to GPT analysis
+```
+
+### Sarcasm Mode 🔥
+
+The bot features an intelligent sarcasm mode that analyzes recent conversation context and delivers perfectly timed sarcastic responses.
+
+**Usage:**
+```
+/gemini S                    # Jump into conversation with sarcastic comment
+/gemini S what do you think? # Sarcastic response about specific topic
+```
+
+**Features:**
+- **Context Analysis**: Automatically fetches and analyzes recent Discord messages
+- **Language Detection**: Detects English, Hinglish, or Romanized Hindi conversation patterns
+- **Multiple Response Styles**: Sarcastic jab, meme reference, simple & salty responses
+- **Intelligent Relevance**: AI determines current conversation thread from timestamps
+- **Personality Modes**: Corporate professional, chaos agent, boomer uncle, and more
+
+**Example:**
+```
+[Recent chat about gaming plans]
+User: /gemini S
+Bot: Oh wow, another "8:30 pe khelenge" plan? Revolutionary scheduling skills! 🎮
 ```
 
 ### Conversation Memory
@@ -150,17 +179,36 @@ app/
 | `DISCORD_TOKEN` | ✅ | Your Discord bot token |
 | `CHATGPT_APIKEY` | ✅ | OpenAI API key for GPT models |
 | `GEMINI_API_KEY` | ✅ | Google AI API key for Gemini models |
+| `DEBUG_MODE` | ❌ | Enable debug output for all bot interactions (default: false) |
 
-### Conversation Settings
+### Debug Mode
 
-Edit `app/storage/conversation_storage.py` to customize:
+When `DEBUG_MODE=true` is set, the bot provides comprehensive console logging for both regular and sarcasm modes:
 
-```python
-ConversationStorage(
-    storage_file="conversations.json",  # Storage location
-    max_history=20,                     # Messages per conversation
-    cleanup_days=7                      # Days before cleanup
-)
+**Regular Mode (`/gemini` or `/gpt`):**
+- User info and channel details
+- Input message content
+- File attachment information
+- AI response content
+- Response delivery confirmation
+
+**Sarcasm Mode (`/gemini S`):**
+- Context analysis details
+- Recent message fetching
+- Language detection results
+- Response generation process
+- Sarcastic output details
+
+Example debug output:
+```
+🤖 REGULAR MODE ACTIVATED by UserName
+📍 Channel: #general | Model: GEMINI
+💬 User input: 'What's the weather like?'
+✅ AI RESPONSE RECEIVED:
+--------------------------------------------------
+💬 Response: The weather varies by location...
+--------------------------------------------------
+📤 Sending to Discord channel...
 ```
 
 ## 🎯 Examples
