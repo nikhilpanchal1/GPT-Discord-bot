@@ -1,0 +1,13 @@
+# Railway service definition.
+# Docs: https://docs.railway.app/guides/config-as-code
+
+[build]
+# Use auto-detected Python configuration from UI.
+
+[deploy]
+# Set the start command for the application.
+startCommand = "python run.py"
+
+# Restart the service on failure.
+restartPolicyType = "never"
+restartPolicyMaxRetries = 10 

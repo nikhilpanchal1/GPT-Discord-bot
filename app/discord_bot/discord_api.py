@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 import os
 import discord
 import aiohttp
+import asyncio
+import functools
 from app.ai_model.openai import get_ai_response
 from app.ai_model.gemini import get_gemini_response
 from app.utils.file_utils import FileProcessor
@@ -220,7 +222,7 @@ Analyze the timestamps and content to identify the current conversation thread. 
 • `/gemini S <message>` - Chat with Gemini in SARCASM MODE 🔥
 
 **File Analysis:**
-• Upload images, PDFs, or text files with your message
+• Upload images, PDFs, or text files with `/gpt` or `/gemini` commands
 • Supports: JPG, PNG, GIF, PDF, TXT files (max 50MB)
 
 **Conversation:**
@@ -230,11 +232,11 @@ Analyze the timestamps and content to identify the current conversation thread. 
 **Features:**
 ✅ Maintains conversation context per user/channel
 ✅ Multimodal analysis (images, documents)
-✅ Automatic file processing
+✅ File processing with explicit commands
 ✅ Smart content extraction
 ✅ Sarcasm mode for maximum wit and edge
 
-Just upload a file and ask a question to analyze it!
+Use `/gpt` or `/gemini` with your file uploads for analysis!
             """
             await message.channel.send(help_text)
             return
@@ -268,13 +270,6 @@ Just upload a file and ask a question to analyze it!
                     model_name = name
                     model_function = func
                     break
-
-        # If no command but there are attachments, default to GPT
-        if not command and message.attachments:
-            command = '/gpt'
-            user_input = content if content else "Please analyze this file."
-            model_name = 'gpt'
-            model_function = get_ai_response
 
         if not command:
             return

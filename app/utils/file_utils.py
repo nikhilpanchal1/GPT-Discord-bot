@@ -1,11 +1,11 @@
 import os
 import io
 import base64
+import mimetypes
 from typing import Dict, List, Optional, Tuple, Union
 from PIL import Image
 import PyPDF2
 import aiofiles
-import magic
 
 class FileProcessor:
     """Handles processing of various file types for AI analysis."""
@@ -13,6 +13,36 @@ class FileProcessor:
     SUPPORTED_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
     SUPPORTED_DOCUMENT_FORMATS = {'.pdf', '.txt'}
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    
+    @staticmethod
+    def _detect_mime_type(file_data: bytes, filename: str) -> str:
+        """
+        Detect MIME type using file extension and basic signature checking.
+        Fallback approach that doesn't require libmagic.
+        """
+        # First try mimetypes based on filename
+        mime_type, _ = mimetypes.guess_type(filename)
+        if mime_type:
+            return mime_type
+        
+        # Fallback: check file signatures (magic bytes)
+        if len(file_data) >= 4:
+            # Common image signatures
+            if file_data[:4] == b'\x89PNG':
+                return 'image/png'
+            elif file_data[:3] == b'\xff\xd8\xff':
+                return 'image/jpeg'
+            elif file_data[:6] == b'GIF87a' or file_data[:6] == b'GIF89a':
+                return 'image/gif'
+            elif file_data[:2] == b'BM':
+                return 'image/bmp'
+            elif file_data[:4] == b'RIFF' and file_data[8:12] == b'WEBP':
+                return 'image/webp'
+            elif file_data[:4] == b'%PDF':
+                return 'application/pdf'
+        
+        # Default fallback
+        return 'application/octet-stream'
     
     @staticmethod
     async def process_file(file_path: str, file_data: bytes) -> Dict:
@@ -43,8 +73,8 @@ class FileProcessor:
             elif file_ext == '.txt':
                 return await FileProcessor._process_text(file_data)
             else:
-                # Try to detect MIME type
-                mime_type = magic.from_buffer(file_data, mime=True)
+                # Try to detect MIME type without libmagic
+                mime_type = FileProcessor._detect_mime_type(file_data, file_path)
                 if mime_type.startswith('image/'):
                     return await FileProcessor._process_image(file_data, file_ext)
                 elif mime_type == 'application/pdf':
