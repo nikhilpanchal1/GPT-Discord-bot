@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
-from google.generativeai.client import configure
-from google.generativeai.generative_models import GenerativeModel
+import google.generativeai as genai
 import os
 from typing import List, Dict, Optional
 import base64
@@ -9,7 +8,7 @@ load_dotenv()
 
 api_key = os.getenv('GEMINI_API_KEY')
 if api_key:
-    configure(api_key=api_key)
+    genai.configure(api_key=api_key)
 
 def get_gemini_response(prompt: str, conversation_history: Optional[List[Dict]] = None, file_info: Optional[Dict] = None) -> str:
     """
@@ -28,10 +27,8 @@ def get_gemini_response(prompt: str, conversation_history: Optional[List[Dict]] 
     
     try:
         # Choose appropriate model based on content
-        if file_info and file_info.get('success') and file_info.get('type') == 'image':
-            model = GenerativeModel('gemini-2.5-pro')
-        else:
-            model = GenerativeModel('gemini-2.5-pro')
+        model_name = 'gemini-1.5-flash'
+        model = genai.GenerativeModel(model_name)
         
         # Build conversation history for context
         full_prompt = ""

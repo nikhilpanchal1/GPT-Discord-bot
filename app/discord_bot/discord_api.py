@@ -112,13 +112,14 @@ Look for patterns like:
 Reply with ONLY ONE WORD: either "english", "hinglish", or "romanized_hindi" """
 
         try:
-            # Use Gemini for quick language analysis
-            from app.ai_model.gemini import get_gemini_response
-            
-            language_result = get_gemini_response(
+            # Use Gemini for quick language analysis (run in a thread to avoid blocking the event loop)
+            language_result = await asyncio.to_thread(
+                get_gemini_response,
                 prompt=analysis_prompt,
-                conversation_history=[]
-            ).strip().lower()
+                conversation_history=[],
+                file_info=None,
+            )
+            language_result = language_result.strip().lower()
             
             # Validate the response
             valid_responses = ['english', 'hinglish', 'romanized_hindi']
@@ -184,7 +185,7 @@ RECENT DISCORD MESSAGES (with timestamps):
 {discord_context if discord_context else "Dead silence... absolutely riveting content here."}
 
 Analyze the timestamps and content to identify the current conversation thread. Focus on the most recent, relevant messages. Then drop ONE perfect sarcastic line that contributes to what's actually happening in the active discussion. {language_instruction} Be edgy, fearless, and hilariously contextual. Don't explain your analysis - just deliver the perfect comeback. think like - What is a funny reply to this conversation? And reply like that, only reply with what's meant for the message If possible, roast one of the users in the conversation or make a joke about the conversation. Dont be afraid of being edgy or offensive" """
-
+        
         # Debug output for the final prompt
         if DEBUG_MODE:
             print("🤖 FINAL SARCASM PROMPT GENERATED:")
@@ -197,7 +198,8 @@ Analyze the timestamps and content to identify the current conversation thread. 
         return sarcasm_prompt
 
     async def on_message(self, message):
-        print(f"Message from {message.author}: {message.content}")
+        if DEBUG_MODE:
+            print(f"Message from {message.author}: {message.content}")
         
         # Prevent self-talk
         if message.author == self.user:
@@ -330,11 +332,12 @@ Use `/gpt` or `/gemini` with your file uploads for analysis!
                     # Create sarcastic prompt
                     sarcastic_prompt = self.create_sarcasm_prompt(user_input, recent_discord_data)
                     
-                    # Get sarcastic response
-                    bot_response = model_function(
+                    # Get sarcastic response (run in a thread to avoid blocking)
+                    bot_response = await asyncio.to_thread(
+                        model_function,
                         prompt=sarcastic_prompt,
                         conversation_history=[],  # No stored conversation history
-                        file_info=file_info
+                        file_info=file_info,
                     )
                     
                     # Debug output for AI response
@@ -355,11 +358,12 @@ Use `/gpt` or `/gemini` with your file uploads for analysis!
                         if file_info and file_info.get('success'):
                             print(f"📎 File attached: {file_info.get('type', 'unknown')} format")
                     
-                    # Get AI response normally
-                    bot_response = model_function(
+                    # Get AI response normally (run in a thread to avoid blocking)
+                    bot_response = await asyncio.to_thread(
+                        model_function,
                         prompt=user_input,
                         conversation_history=[],  # No stored conversation history
-                        file_info=file_info
+                        file_info=file_info,
                     )
                     
                     # Debug output for AI response
