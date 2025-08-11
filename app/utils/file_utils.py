@@ -5,7 +5,6 @@ import mimetypes
 from typing import Dict, List, Optional, Tuple, Union
 from PIL import Image
 import PyPDF2
-import aiofiles
 
 class FileProcessor:
     """Handles processing of various file types for AI analysis."""

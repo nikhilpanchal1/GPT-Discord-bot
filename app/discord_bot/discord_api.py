@@ -1,204 +1,255 @@
 from dotenv import load_dotenv
 import os
+import asyncio
 import discord
 import aiohttp
-import asyncio
-import functools
 from app.ai_model.openai import get_ai_response
 from app.ai_model.gemini import get_gemini_response
 from app.utils.file_utils import FileProcessor
+from app.privacy.privacy_manager import PrivacyManager
 
 load_dotenv()
 
 discord_token = os.getenv('DISCORD_TOKEN')
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+PRIVACY_MODE = os.getenv('PRIVACY_MODE', 'strict').lower()  # strict, balanced, permissive
 
 class MyClient(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.file_processor = FileProcessor()
+        self.privacy_manager = PrivacyManager()
 
     async def on_ready(self):
-        print(f'Logged on as {self.user}!')
-        print(f'Bot is ready. Sarcasm mode is optional! 🔥')
+        print(f'🔐 Privacy-Enhanced Bot logged in as {self.user}!')
+        print(f'Privacy Mode: {PRIVACY_MODE.upper()}')
+        print(f'Encryption: {"Enabled" if hasattr(self.privacy_manager, "fernet") else "Disabled"}')
+        # Start periodic cleanup for expired cache
+        asyncio.create_task(self._periodic_cleanup())
+
+    async def _periodic_cleanup(self):
+        """Periodic cleanup of expired cache and temporary data"""
+        while True:
+            await asyncio.sleep(300)
+            self.privacy_manager.cleanup_expired_cache()
     
-    async def fetch_recent_discord_messages(self, channel, limit=20):
-        """Fetch recent messages and identify the ongoing conversation thread"""
+    async def get_conversation_context(self, user_id: str, channel, max_messages: int = 20):
+        """Get conversation context with privacy protection.
+
+        - Uses encrypted in-memory cache if user consents
+        - Otherwise fetches directly from Discord API with privacy safeguards
+        """
+        cached_context = self.privacy_manager.get_cached_context(user_id, str(channel.id))
+        if cached_context:
+            if DEBUG_MODE:
+                print("🔓 Using encrypted cached context")
+            return self._parse_cached_context(cached_context)
+
+        return await self._fetch_discord_context(user_id, channel, max_messages)
+
+    async def _fetch_discord_context(self, user_id: str, channel, max_messages: int):
+        """Fetch context from Discord API with privacy safeguards."""
         try:
             raw_messages = []
-            async for message in channel.history(limit=limit, oldest_first=False):
-                # Skip bot's own messages and system messages
-                if message.author == self.user or message.type != discord.MessageType.default:
+            message_count = 0
+
+            async for message in channel.history(limit=max_messages * 2, oldest_first=False):
+                if message.author == self.user:
                     continue
-                
-                if message.content.strip():  # Only include messages with actual content
-                    raw_messages.append({
-                        'timestamp': message.created_at,
-                        'author': message.author.display_name or message.author.name,
-                        'content': message.content.strip()
-                    })
-            
+                if message.type != discord.MessageType.default:
+                    continue
+                if not message.content.strip() or message.content.startswith('/'):
+                    continue
+
+                author_name = message.author.display_name or message.author.name
+                if PRIVACY_MODE == 'strict':
+                    author_name = f"User{hash(str(message.author.id)) % 100:02d}"
+
+                raw_messages.append({
+                    'timestamp': message.created_at,
+                    'author': author_name,
+                    'content': message.content.strip(),
+                    'author_id': str(message.author.id),
+                })
+
+                message_count += 1
+                if message_count >= max_messages:
+                    break
+
             if not raw_messages:
-                return [], "english"
-            
-            # Reverse to get chronological order (oldest first)
+                return [], "english", []
+
             raw_messages.reverse()
-            
-            # Analyze language patterns across all messages
-            language_style = await self.analyze_language_style(raw_messages)
-            
-            # Format messages with timestamps for AI analysis
+
+            language_style = await self._analyze_language_patterns(raw_messages[-6:])
+
+            participants = list(set(msg['author'] for msg in raw_messages))
+
             formatted_messages = []
             for msg in raw_messages:
                 time_str = msg['timestamp'].strftime("%H:%M")
                 formatted_messages.append(f"[{time_str}] {msg['author']}: {msg['content']}")
-            
-            # Debug output to console
-            if DEBUG_MODE:
-                print("\n" + "="*60)
-                print("🔍 SARCASM MODE - CONTEXT ANALYSIS")
-                print("="*60)
-                print(f"📊 Total messages fetched: {len(raw_messages)}")
-                print(f"🌐 Language analysis result: {language_style.upper()}")
-                print(f"📋 Context messages being used: {len(formatted_messages)}")
-                print("\n📱 DISCORD MESSAGES IN CONTEXT:")
-                print("-" * 40)
-                for i, msg in enumerate(formatted_messages, 1):
-                    print(f"{i:2d}. {msg}")
-                print("-" * 40)
-                language_display = {
-                    "english": "English-only",
-                    "hinglish": "Hinglish (English + Hindi words)",
-                    "romanized_hindi": "Romanized Hindi"
-                }.get(language_style, "English-only")
-                print(f"🎯 Language instruction will be: {language_display}")
-                print("📝 AI will determine which messages are relevant to current conversation")
-                print("="*60 + "\n")
-            
-            return formatted_messages, language_style
-            
-        except Exception as e:
-            print(f"Error fetching Discord messages: {e}")
-            return [], "english"
 
-    async def analyze_language_style(self, messages):
-        """Use AI to analyze conversation language patterns"""
+            context_data = {
+                'messages': formatted_messages,
+                'language': language_style,
+                'participants': participants,
+                'cached_at': os.getenv('NOW_TS') or '',
+            }
+
+            self.privacy_manager.cache_context_temporarily(user_id, str(channel.id), context_data)
+
+            if DEBUG_MODE:
+                print(f"📡 Fetched {len(raw_messages)} messages from Discord API")
+                print(f"🔒 Privacy mode: {PRIVACY_MODE}")
+
+            return formatted_messages, language_style, participants
+
+        except Exception as error:
+            print(f"Error fetching Discord context: {error}")
+            return [], "english", []
+
+    def _parse_cached_context(self, cached_data: dict):
+        return (
+            cached_data.get('messages', []),
+            cached_data.get('language', 'english'),
+            cached_data.get('participants', []),
+        )
+
+    async def _analyze_language_patterns(self, messages):
+        """Privacy-safe language analysis using anonymized text sample."""
         if not messages:
             return "english"
-        
-        # Prepare sample messages for AI analysis
-        sample_messages = []
-        for msg in messages[-8:]:  # Last 8 messages for context
-            sample_messages.append(f"{msg['author']}: {msg['content']}")
-        
-        conversation_sample = "\n".join(sample_messages)
-        
-        # AI language analysis prompt
-        analysis_prompt = f"""Analyze the language style of this Discord conversation and categorize it:
 
-CONVERSATION SAMPLE:
-{conversation_sample}
+        sample_text = ""
+        for msg in messages:
+            content = msg['content']
+            # Basic anonymization - remove mentions and links
+            import re
+            content = re.sub(r'<[@#][!&]?\d+>', '[mention]', content)
+            content = re.sub(r'https?://\S+', '[link]', content)
+            sample_text += f"{content} "
 
-LANGUAGE CATEGORIES:
-1. **english** - Pure English conversation (e.g., "Let's play at 8:30", "That's awesome dude")
-2. **hinglish** - English mixed with Hindi words (e.g., "Let's play yaar", "That's bohot cool bhai")  
-3. **romanized_hindi** - Hindi expressed in English letters (e.g., "Kya kar rahe ho", "Khel lo abhi")
+        analysis_prompt = f"""Analyze language patterns in this text sample:
 
-Look for patterns like:
-- Hindi words: yaar, bhai, kya, hai, nahi, dekho, chalo, etc.
-- Romanized Hindi: sentence structures that are Hindi but written in English
-- Code-switching between languages within sentences
+TEXT: {sample_text[:500]}
 
-Reply with ONLY ONE WORD: either "english", "hinglish", or "romanized_hindi" """
+Identify the primary language pattern:
+- english: Pure English
+- hinglish: English mixed with Hindi words  
+- romanized_hindi: Hindi written in English letters
+
+Consider common Hindi words like: yaar, bhai, kya, hai, nahi, chalo, dekho, etc.
+
+Respond with only: english, hinglish, or romanized_hindi"""
 
         try:
-            # Use Gemini for quick language analysis
-            from app.ai_model.gemini import get_gemini_response
-            
-            language_result = get_gemini_response(
-                prompt=analysis_prompt,
-                conversation_history=[]
-            ).strip().lower()
-            
-            # Validate the response
-            valid_responses = ['english', 'hinglish', 'romanized_hindi']
-            if language_result in valid_responses:
-                result = language_result
-            else:
-                result = "english"  # Default fallback
-            
-            if DEBUG_MODE:
-                print(f"🔤 AI LANGUAGE ANALYSIS:")
-                print(f"   Sample messages analyzed: {len(sample_messages)}")
-                print(f"   AI analysis result: {result.upper()}")
-                print(f"   ✅ Language mode determined by AI pattern recognition")
-            
-            return result
-            
-        except Exception as e:
-            if DEBUG_MODE:
-                print(f"❌ Language analysis failed: {e}")
-                print(f"   Falling back to: ENGLISH")
+            result = get_gemini_response(analysis_prompt, [])
+            result_lower = result.strip().lower()
+            return result_lower if result_lower in ['english', 'hinglish', 'romanized_hindi'] else 'english'
+        except Exception:
             return "english"
 
-    def create_sarcasm_prompt(self, user_input, recent_discord_data):
-        """Create a sarcastic prompt focused on recent Discord conversation"""
-        
-        # Unpack the data (messages, language_style)
-        if isinstance(recent_discord_data, tuple):
-            recent_discord_messages, language_style = recent_discord_data
-        else:
-            recent_discord_messages, language_style = recent_discord_data or [], "english"
-        
-        # Build context from recent Discord messages
-        discord_context = ""
-        if recent_discord_messages:
-            discord_context = "\n".join(recent_discord_messages)
-        
-        # Determine language instruction based on AI analysis
-        if language_style == "hinglish":
-            language_instruction = "Use Hinglish (English mixed with Hindi words like 'yaar', 'bhai', 'kya') to match the conversation vibe."
-        elif language_style == "romanized_hindi":
-            language_instruction = "Use romanized Hindi (Hindi words written in English letters) to match their style. Feel free to use phrases like 'kya kar rahe ho', 'chalo', 'dekho', etc."
-        else:  # english
-            language_instruction = "Keep it in pure English to match the conversation style."
-        
-        # Handle different sarcasm scenarios
+    def create_privacy_safe_sarcasm_prompt(self, user_input: str, message_author: str, context_data):
+        """Create sarcasm prompt with privacy protection."""
+        formatted_messages, language_style, participants = context_data
+
+        safe_participants = [p for p in participants if p != message_author]
+
+        recent_context = formatted_messages[-8:] if formatted_messages else []
+        context_text = "\n".join(recent_context)
+
+        language_instructions = {
+            "hinglish": "Use Hinglish naturally (English + Hindi words like 'yaar', 'bhai').",
+            "romanized_hindi": "Use romanized Hindi style.",
+            "english": "Use English with modern slang and expressions.",
+        }
+
         if user_input.strip():
-            # User provided additional context/question
-            sarcasm_prompt = f"""You're a sarcastic friend in this Discord chat. Make a witty, sarcastic comment about: "{user_input}"
+            prompt = f"""Jump into this chat with sarcastic wit about: "{user_input}"
 
-ONGOING CONVERSATION THREAD:
-{discord_context if discord_context else "Nothing much happening..."}
+RECENT CONTEXT:
+{context_text}
 
-Reply with one sarcastic line that contributes to this active discussion. {language_instruction} Be funny and edgy."""
+GUIDELINES:
+- Target the topic "{user_input}" or conversation themes
+- Participants available for light roasting: {', '.join(safe_participants) if safe_participants else 'the situation'}  
+- NEVER target: {message_author} (they requested the sarcasm)
+- {language_instructions.get(language_style, language_instructions['english'])}
+- Keep it playful, not harsh
+- One sharp, contextual line
+
+Deliver your sarcastic take:"""
         else:
-            # Just "/gemini S" - comment on recent conversation thread
-            sarcasm_prompt = f"""You're about to jump into this Discord chat with maximum sarcastic energy. First, analyze the messages below and identify the CURRENT/ONGOING conversation thread based on timestamps and content relevance. Ignore old/irrelevant messages and focus on the most recent active discussion.
+            prompt = f"""Analyze this Discord conversation and jump in with perfect sarcastic timing:
 
-RESPONSE STYLE OPTIONS:
-1. **The Sarcastic Jab** - Sharp, witty roast that cuts deep but stays funny
-2. **The Meme Reference** - Pop culture or internet meme callback that's perfectly timed  
+RECENT CONVERSATION:
+{context_text}
 
-RECENT DISCORD MESSAGES (with timestamps):
-{discord_context if discord_context else "Dead silence... absolutely riveting content here."}
+PARTICIPANTS: {', '.join(safe_participants) if safe_participants else 'various people'}
+REQUESTER: {message_author} (don't roast them!)
 
-Analyze the timestamps and content to identify the current conversation thread. Focus on the most recent, relevant messages. Then drop ONE perfect sarcastic line that contributes to what's actually happening in the active discussion. {language_instruction} Be edgy, fearless, and hilariously contextual. Don't explain your analysis - just deliver the perfect comeback. think like - What is a funny reply to this conversation? And reply like that, only reply with what's meant for the message If possible, roast one of the users in the conversation or make a joke about the conversation. Dont be afraid of being edgy or offensive" """
+SARCASM OPTIONS:
+1. Mock something said in recent conversation
+2. Playfully roast a participant's comment  
+3. Make fun of the situation/topic
+4. Reference conversation patterns
 
-        # Debug output for the final prompt
-        if DEBUG_MODE:
-            print("🤖 FINAL SARCASM PROMPT GENERATED:")
-            print("-" * 50)
-            print(sarcasm_prompt[:500] + "..." if len(sarcasm_prompt) > 500 else sarcasm_prompt)
-            print("-" * 50)
-            print(f"💬 User input: '{user_input}' | Language mode: {language_style}")
-            print("🚀 Sending to AI model for sarcastic response...\n")
+STYLE: {language_instructions.get(language_style, language_instructions['english'])}
 
-        return sarcasm_prompt
+Drop one perfectly timed sarcastic line:"""
+
+        return prompt
+
+    async def handle_privacy_command(self, message, args):
+        """Handle privacy-related commands."""
+        user_id = str(message.author.id)
+
+        if not args:
+            allows_caching = self.privacy_manager.user_consents_to_caching(user_id)
+            cache_status = "✅ Enabled" if allows_caching else "❌ Disabled"
+
+            privacy_info = f"""🔐 **Your Privacy Settings:**
+
+**Conversation Caching:** {cache_status}
+**Privacy Mode:** {PRIVACY_MODE.upper()}
+**Data Encryption:** ✅ Enabled
+**Cache Duration:** 2 hours max (in-memory only)
+
+**Commands:**
+• `/privacy allow` - Enable encrypted caching (faster responses)
+• `/privacy deny` - Disable all caching (slower, more private)  
+• `/privacy clear` - Clear all your cached data
+• `/privacy info` - Show this information
+
+**How it works:**
+- Bot reads recent Discord messages for context
+- With caching: Temporarily encrypts & stores context (2h max)
+- Without caching: Fetches fresh context each time (slower)
+- Personal identifiers are anonymized in strict mode"""
+
+            await message.channel.send(privacy_info)
+
+        elif args[0] == 'allow':
+            self.privacy_manager.set_user_privacy_preference(user_id, True)
+            await message.channel.send("✅ Encrypted caching enabled. Responses will be faster!")
+
+        elif args[0] == 'deny':
+            self.privacy_manager.set_user_privacy_preference(user_id, False)
+            self.privacy_manager.clear_user_cache(user_id)
+            await message.channel.send("❌ Caching disabled. All your data cleared. Responses may be slower.")
+
+        elif args[0] == 'clear':
+            self.privacy_manager.clear_user_cache(user_id)
+            await message.channel.send("🧹 All your cached data has been cleared!")
+
+        else:
+            await message.channel.send("Invalid privacy command. Use `/privacy` to see options.")
 
     async def on_message(self, message):
-        print(f"Message from {message.author}: {message.content}")
-        
+        if DEBUG_MODE:
+            print(f"📨 Message from {message.author}: {message.content[:100]}...")
+
         # Prevent self-talk
         if message.author == self.user:
             return
@@ -206,46 +257,48 @@ Analyze the timestamps and content to identify the current conversation thread. 
         user_id = str(message.author.id)
         channel_id = str(message.channel.id)
         content = message.content.strip()
-        
-        # Handle special commands
-        if content.lower() in ['/clear', '/reset']:
-            await message.channel.send("🧹 Fresh start! Ready for more sarcastic conversations! 🔥")
-            return
-        
-        if content.lower() in ['/help', '/commands']:
-            help_text = """
-🤖 **Available Commands:**
 
-**AI Models:**
-• `/gpt <message>` - Chat with GPT-4o
-• `/gemini <message>` - Chat with Gemini Flash
-• `/gemini S <message>` - Chat with Gemini in SARCASM MODE 🔥
+        # Privacy command handling
+        if content.startswith('/privacy'):
+            args = content.split()[1:] if len(content.split()) > 1 else []
+            await self.handle_privacy_command(message, args)
+            return
+
+        # Handle clear/reset command (privacy-safe)
+        if content.lower() in ['/clear', '/reset']:
+            self.privacy_manager.clear_user_cache(user_id)
+            await message.channel.send("🧹 Your data cleared! Ready for fresh conversations.")
+            return
+
+        if content.lower() in ['/help', '/commands']:
+            help_text = """🤖 **Enhanced AI Discord Bot Commands:**
+
+**Chat Models:**
+• `/gpt <message>` - GPT-4o conversation with memory
+• `/gemini <message>` - Gemini conversation with memory
+• `/gemini S [message]` - SARCASM MODE 🔥 (roasts chat, not you!)
 
 **File Analysis:**
-• Upload images, PDFs, or text files with `/gpt` or `/gemini` commands
-• Supports: JPG, PNG, GIF, PDF, TXT files (max 50MB)
+• Upload + `/gpt` or `/gemini` - Smart multimodal analysis
+• Supports: Images, PDFs, text files (50MB max)
 
-**Conversation:**
-• `/clear` or `/reset` - Clear conversation history
-• `/help` - Show this help message
+**Memory & Utils:**
+• `/clear` - Reset conversation memory
+• `/help` - Show this menu
 
 **Features:**
-✅ Maintains conversation context per user/channel
-✅ Multimodal analysis (images, documents)
-✅ File processing with explicit commands
-✅ Smart content extraction
-✅ Sarcasm mode for maximum wit and edge
+✅ Persistent conversation memory per user/channel
+✅ Advanced file processing with context
+✅ Smart sarcasm that targets chat content
+✅ Multi-language support (English/Hinglish/Hindi)"""
 
-Use `/gpt` or `/gemini` with your file uploads for analysis!
-            """
             await message.channel.send(help_text)
             return
-        
-        # Parse command and model selection
+
+        # Command parsing
         model_map = {
             '/gpt': ('gpt', get_ai_response),
-            'gpt3': ('gpt', get_ai_response),  # Legacy support
-            '/gemini': ('gemini', get_gemini_response)
+            '/gemini': ('gemini', get_gemini_response),
         }
 
         command = None
@@ -253,16 +306,15 @@ Use `/gpt` or `/gemini` with your file uploads for analysis!
         model_name = None
         model_function = None
         sarcasm_mode = False
-        
-        # Check for sarcasm mode first
+
+        # Check for sarcasm mode
         if content.startswith('/gemini S'):
             command = '/gemini'
-            user_input = content[9:].strip()  # Remove '/gemini S' prefix
+            user_input = content[9:].strip()
             model_name = 'gemini'
             model_function = get_gemini_response
             sarcasm_mode = True
         else:
-            # Regular command parsing
             for prefix, (name, func) in model_map.items():
                 if content.startswith(prefix):
                     command = prefix
@@ -274,130 +326,105 @@ Use `/gpt` or `/gemini` with your file uploads for analysis!
         if not command:
             return
 
-        # Ensure we have valid values (type safety)
-        if model_name is None or model_function is None:
-            return
-
-        # Handle empty input - allow sarcasm mode to proceed without input
         if not user_input and not message.attachments and not sarcasm_mode:
-            await message.channel.send(f"Please provide a prompt after the `{command}` command or upload a file to analyze.")
+            await message.channel.send(f"💡 Please provide a message after `{command}` or upload a file to analyze.")
             return
-        
-        # Ensure user_input is not None
-        if user_input is None:
-            user_input = "Please analyze this file." if message.attachments else ""
 
-        # Show typing indicator
+        if user_input is None:
+            user_input = ""
+
         async with message.channel.typing():
             try:
-                # Process attachments
                 file_info = None
                 if message.attachments:
-                    attachment = message.attachments[0]  # Process first attachment
-                    
-                    # Download file
+                    attachment = message.attachments[0]
+
                     async with aiohttp.ClientSession() as session:
                         async with session.get(attachment.url) as response:
                             if response.status == 200:
                                 file_data = await response.read()
                                 file_info = await self.file_processor.process_file(attachment.filename, file_data)
-                                
+
                                 if not file_info.get('success'):
-                                    await message.channel.send(f"❌ Error processing file: {file_info.get('error', 'Unknown error')}")
+                                    await message.channel.send(f"❌ File processing failed: {file_info.get('error', 'Unknown error')}")
                                     return
-                                
-                                # Enhance prompt with file information
-                                if file_info.get('type') == 'document':
-                                    user_input = self.file_processor.create_multimodal_prompt(user_input, file_info)
-                                else:
-                                    # For images, let the AI model handle the multimodal content directly
-                                    pass
-                                    
-                                await message.channel.send(f"📎 File processed: {attachment.filename} ({file_info.get('type', 'unknown')} format)")
+
+                                await message.channel.send(f"📎 Processed: {attachment.filename} • {file_info.get('type', 'unknown').title()} format")
                             else:
-                                await message.channel.send(f"❌ Failed to download attachment: HTTP {response.status}")
+                                await message.channel.send(f"❌ Download failed: HTTP {response.status}")
                                 return
 
-                # Handle sarcasm mode
+                # Get privacy-safe context
+                context_data = await self.get_conversation_context(user_id, message.channel)
+
                 if sarcasm_mode:
                     if DEBUG_MODE:
-                        print(f"\n🔥 SARCASM MODE ACTIVATED by {message.author.display_name}")
-                        print(f"📍 Channel: #{message.channel.name} | User input: '{user_input}'")
-                    
-                    # Fetch recent Discord messages and language analysis
-                    recent_discord_data = await self.fetch_recent_discord_messages(message.channel)
-                    
-                    # Create sarcastic prompt
-                    sarcastic_prompt = self.create_sarcasm_prompt(user_input, recent_discord_data)
-                    
-                    # Get sarcastic response
-                    bot_response = model_function(
-                        prompt=sarcastic_prompt,
-                        conversation_history=[],  # No stored conversation history
-                        file_info=file_info
-                    )
-                    
-                    # Debug output for AI response
-                    if DEBUG_MODE:
-                        print("✅ AI SARCASTIC RESPONSE RECEIVED:")
-                        print("-" * 50)
-                        print(f"💬 Response: {bot_response}")
-                        print("-" * 50)
-                        print("📤 Sending to Discord channel...\n")
-                    
-                    # Add sarcasm indicator to model name
-                    display_model_name = f"{model_name.upper()} SARCASM MODE 🔥"
-                else:
-                    if DEBUG_MODE:
-                        print(f"\n🤖 REGULAR MODE ACTIVATED by {message.author.display_name}")
-                        print(f"📍 Channel: #{message.channel.name} | Model: {model_name.upper()}")
-                        print(f"💬 User input: '{user_input}'")
-                        if file_info and file_info.get('success'):
-                            print(f"📎 File attached: {file_info.get('type', 'unknown')} format")
-                    
-                    # Get AI response normally
-                    bot_response = model_function(
-                        prompt=user_input,
-                        conversation_history=[],  # No stored conversation history
-                        file_info=file_info
-                    )
-                    
-                    # Debug output for AI response
-                    if DEBUG_MODE:
-                        print("✅ AI RESPONSE RECEIVED:")
-                        print("-" * 50)
-                        print(f"💬 Response: {bot_response}")
-                        print("-" * 50)
-                        print("📤 Sending to Discord channel...\n")
-                    
-                    display_model_name = model_name.upper()
-                
-                # Send response (split if too long)
-                if len(bot_response) > 2000:
-                    # Split long messages
-                    for i in range(0, len(bot_response), 1900):
-                        chunk = bot_response[i:i+1900]
-                        if i == 0:
-                            await message.channel.send(f"🤖 **{display_model_name}:** {chunk}")
-                        else:
-                            await message.channel.send(chunk)
-                else:
-                    await message.channel.send(f"🤖 **{display_model_name}:** {bot_response}")
-                
-                # File analysis confirmation
-                if file_info and file_info.get('success'):
-                    file_type = file_info.get('type', 'file')
-                    if file_type == 'image':
-                        await message.add_reaction('🖼️')
-                    elif file_type == 'document':
-                        await message.add_reaction('📄')
-                    else:
-                        await message.add_reaction('📎')
+                        print(f"🔥 SARCASM MODE: {message.author.display_name} in #{message.channel.name}")
 
-            except Exception as e:
-                error_msg = f"❌ Error processing request: {str(e)}"
-                print(f"Error in on_message: {e}")
+                    prompt = self.create_privacy_safe_sarcasm_prompt(
+                        user_input,
+                        message.author.display_name or message.author.name,
+                        context_data,
+                    )
+                    bot_response = model_function(prompt, [], file_info)
+                    display_model = f"{model_name.upper()} SARCASM 🔥"
+                else:
+                    if DEBUG_MODE:
+                        print(f"🤖 REGULAR MODE: {message.author.display_name} using {model_name.upper()}")
+
+                    formatted_messages, _, _ = context_data
+                    # Convert formatted context to a simple conversation history (privacy-safe)
+                    conversation_history = []
+                    for line in formatted_messages[-6:]:
+                        if '] ' in line:
+                            author_part = line.split('] ', 1)[1]
+                            if ': ' in author_part:
+                                _author, content_part = author_part.split(': ', 1)
+                                conversation_history.append({'role': 'user', 'content': content_part})
+
+                    bot_response = model_function(user_input, conversation_history, file_info)
+                    display_model = model_name.upper()
+
+                await self.send_response(message.channel, bot_response, display_model)
+
+                if file_info and file_info.get('success'):
+                    reactions = {
+                        'image': '🖼️',
+                        'document': '📄',
+                    }
+                    reaction = reactions.get(file_info.get('type'), '📎')
+                    await message.add_reaction(reaction)
+
+            except Exception as error:
+                error_msg = f"❌ Something went wrong: {str(error)}"
+                print(f"Error in message processing: {error}")
                 await message.channel.send(error_msg)
+
+    async def send_response(self, channel, response: str, model_name: str):
+        """Enhanced response sending with better formatting"""
+        if len(response) <= 1900:  # Leave room for model name
+            await channel.send(f"🤖 **{model_name}:** {response}")
+        else:
+            chunks = []
+            current_chunk = ""
+            paragraphs = response.split('\n\n')
+
+            for para in paragraphs:
+                if len(current_chunk + para) < 1800:
+                    current_chunk += para + '\n\n'
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = para + '\n\n'
+
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+
+            for index, chunk in enumerate(chunks):
+                if index == 0:
+                    await channel.send(f"🤖 **{model_name}:** {chunk}")
+                else:
+                    await channel.send(chunk)
 
 intents = discord.Intents.default()
 intents.message_content = True

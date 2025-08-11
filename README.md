@@ -1,9 +1,9 @@
 # 🤖 Enhanced GPT-Discord Bot
 
-A sophisticated Discord bot engineered with persistent conversation memory and advanced multimodal processing capabilities. Built on OpenAI GPT-4o and Google Gemini models.
+A privacy-first Discord bot with advanced multimodal capabilities. Built on OpenAI GPT-4o and Google Gemini models.
 
 ## Key Features
-• **Persistent Conversations**: Built per-user/channel memory with automatic context injection
+• **Privacy-First Context**: Live Discord context with optional encrypted, in‑memory cache (opt‑in, 2h TTL)
 • **Multimodal Analysis**: Integrated GPT-4V + Gemini Vision for images, PDF extraction for documents  
 • **Smart File Processing**: Developed drag-and-drop analysis with automatic type detection (50MB limit)
 • **Sarcasm Mode**: AI-powered sarcastic responses with intelligent conversation context analysis
@@ -16,7 +16,7 @@ A sophisticated Discord bot engineered with persistent conversation memory and a
 • Designed intelligent language detection system for English, Hinglish, and Romanized Hindi
 • Built dynamic response generation with multiple personality modes and styles
 • Architected type-safe codebase with comprehensive error handling and message splitting
-• Built modular architecture: separate storage, utils, and AI model layers
+• Implemented encrypted in‑memory caching and user privacy controls (/privacy)
 
 ## Usage Examples
 Upload image + "/gpt analyze this chart" → Full GPT-4V analysis with conversation context  
@@ -114,13 +114,12 @@ User: /gemini S
 Bot: Oh wow, another "8:30 pe khelenge" plan? Revolutionary scheduling skills! 🎮
 ```
 
-### Conversation Memory
+### Context and Memory
 
-The bot automatically:
-- Remembers your previous messages in each channel
-- Maintains context across multiple exchanges
-- Stores conversations persistently
-- Provides natural, contextual responses
+The bot:
+- Fetched recent context live from the Discord API (default, no persistence)
+- Optionally cached context encrypted in memory for up to 2 hours (per‑user opt‑in)
+- Did not persist message content to disk; only user consent settings were stored
 
 Example conversation:
 ```
@@ -148,20 +147,18 @@ app/
 │   ├── openai.py      # GPT-4o integration with multimodal support
 │   └── gemini.py      # Gemini integration with vision capabilities
 ├── discord_bot/
-│   └── discord_api.py # Main bot logic with file handling
-├── storage/
-│   └── conversation_storage.py # Persistent conversation memory
+│   └── discord_api.py # Main bot logic with privacy-safe context handling
+├── privacy/
+│   └── privacy_manager.py # Encrypted in-memory cache + user privacy preferences
 └── utils/
     └── file_utils.py  # File processing and content extraction
 ```
 
-### Conversation Storage
+### Privacy & Context Handling
 
-- **Format**: JSON with timestamps and metadata
-- **Location**: `conversations.json` in project root
-- **Structure**: Organized by user-channel pairs
-- **Retention**: 7 days (configurable)
-- **Max History**: 20 messages per conversation (configurable)
+- **Primary Source**: Recent Discord messages fetched live (no persistence of message content)
+- **Optional Cache**: Encrypted, in‑memory context cache (2h TTL), per‑user opt‑in via `/privacy allow`
+- **Preferences File**: `user_privacy.json` persisted with consent flags and timestamps only (no message text)
 
 ### Error Handling
 
@@ -180,10 +177,27 @@ app/
 | `CHATGPT_APIKEY` | ✅ | OpenAI API key for GPT models |
 | `GEMINI_API_KEY` | ✅ | Google AI API key for Gemini models |
 | `DEBUG_MODE` | ❌ | Enable debug output for all bot interactions (default: false) |
+| `BOT_ENCRYPTION_KEY` | ✅ | Symmetric key for encrypting in-memory cache (generated on first run if missing) |
+| `PRIVACY_MODE` | ❌ | `strict` (default), `balanced`, or `permissive` |
 
 ### Debug Mode
 
 When `DEBUG_MODE=true` is set, the bot provides comprehensive console logging for both regular and sarcasm modes:
+### Privacy
+
+This bot supports privacy-enhanced context handling:
+
+- Primary context is fetched live from the Discord API (no persistence)
+- Optional encrypted, in-memory cache with 2-hour expiry, opt-in per user via `/privacy` commands
+- Strict mode anonymizes participant names in prompts
+
+Commands:
+
+- `/privacy` – Show settings and help
+- `/privacy allow` – Enable encrypted caching
+- `/privacy deny` – Disable caching and clear any cached data
+- `/privacy clear` – Clear your cached data
+
 
 **Regular Mode (`/gemini` or `/gpt`):**
 - User info and channel details
@@ -241,7 +255,7 @@ Bot: For your trip to Japan, the best times to visit are...
 - The bot processes one attachment per message
 - Image analysis uses GPT-4o or Gemini Vision models
 - Document text is extracted and included in the prompt
-- Conversations are automatically saved and restored
+- Context was fetched live each time unless a user opted into encrypted caching
 - File processing is asynchronous for better performance
 
 ## 🤝 Contributing
